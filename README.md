@@ -6,6 +6,27 @@
 ├── tile_server.html    # Mapbox frontend
 ├── requirements.txt    # Dependencies
 
+
+### Create a Virtual Environment
+
+Run the following command to create a virtual environment:
+
+```sh
+python -m venv venv
+```
+
+### Activate the Virtual Environment
+
+#### Linux and macOS
+```sh
+source venv/bin/activate
+```
+
+#### Windows
+```sh
+venv\Scripts\activate
+```
+
 ### Install Dependencies
 
 Ensure you have the necessary dependencies installed:
