@@ -139,4 +139,4 @@ m.save("aqi_map.html")
 print("Map saved to aqi_map.html")
 
  
-print(f"✓ AQI map saved ")
+print(f"✓ AQI map saved  ")

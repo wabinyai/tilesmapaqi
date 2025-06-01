@@ -50,3 +50,4 @@ coverage/
 venv
 
 *.html
+*__pycache__
