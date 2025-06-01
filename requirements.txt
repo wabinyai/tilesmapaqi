@@ -1,5 +1,12 @@
-flask
-psycopg2-binary
+flask 
 protobuf
 shapely
 geojson
+python-dotenv
+mapbox_vector_tile
+flask_cors
+pandas 
+geopandas
+python-mapnik
+psycopg2
+scikit-learn
