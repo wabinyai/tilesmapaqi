@@ -12,7 +12,7 @@
 Run the following command to create a virtual environment:
 
 ```sh
-python -m venv venv
+python3.10 -m venv venv
 ```
 
 ### Activate the Virtual Environment
