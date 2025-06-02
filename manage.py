@@ -78,12 +78,13 @@ def create_interpolated_overlay(data, resolution=1000):
                 rgba_image[i, j] = (0, 0, 0, 0)  # Transparent for NaN
             else:
                 rgba_image[i, j] = aqi_to_color(grid_aqi[i, j])
-
+    
     return rgba_image, (lat_min, lat_max, lon_min, lon_max)
 
 # 3. Save image and add to map with horizontal repetition
 def add_image_overlay(image_array, bounds, map_obj):
     fig, ax = plt.subplots(figsize=(8, 8), dpi=1000)
+    lat_min, lat_max, lon_min, lon_max = bounds
     ax.imshow(image_array, extent=[0, 1, 0, 1], origin='lower')
     ax.axis('off')
 

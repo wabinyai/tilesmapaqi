@@ -10,3 +10,4 @@ geopandas
 python-mapnik
 psycopg2
 scikit-learn
+redis
