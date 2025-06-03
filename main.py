@@ -86,7 +86,7 @@ def fetch_aqi_data():
         port=os.getenv("DB_PORT", "5432")
     )
     cur = conn.cursor()
-    cur.execute("SELECT latitude, longitude, pm10 FROM cams_pm10 WHERE pm10 IS NOT NULL;")
+    cur.execute("SELECT latitude, longitude, pm2p5 FROM cams_pm25 WHERE pm2p5 IS NOT NULL;")
     rows = cur.fetchall()
     cur.close()
     conn.close()
