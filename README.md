@@ -49,3 +49,14 @@ access airflow
 ```sh
 http://localhost:8080
 ```
+
+
+# run
+
+to run index.html
+```python -m http.server 8080
+```
+
+to run FAST API
+```uvicorn main:app --reload
+```
