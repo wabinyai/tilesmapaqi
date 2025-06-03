@@ -57,6 +57,6 @@ to run index.html
 ```python -m http.server 8080
 ```
 
-to run FAST API
+to run FAST API in main.py
 ```uvicorn main:app --reload
 ```
