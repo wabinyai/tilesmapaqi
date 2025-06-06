@@ -60,3 +60,7 @@ to run index.html
 to run FAST API in main.py
 ```uvicorn main:app --reload
 ```
+
+# run main.py for wind
+```flask run
+```
