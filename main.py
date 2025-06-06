@@ -13,6 +13,11 @@ import base64
 from datetime import datetime
 import redis
 import json
+import matplotlib.pyplot as plt
+import matplotlib
+
+# Use 'Agg' backend for headless environments
+matplotlib.use('Agg')
 
 # Load environment variables
 load_dotenv()
@@ -20,7 +25,7 @@ load_dotenv()
 # FastAPI app
 app = FastAPI()
 
-# CORS
+# CORS configuration
 origins = [
     "http://localhost:8080",
     "http://127.0.0.1:8080",
@@ -39,10 +44,15 @@ redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=int(os.getenv("REDIS_PORT", 6379)),
     db=0,
-    decode_responses=True  # Automatically decode strings
+    decode_responses=True
 )
 
-# --- AQI Utility Functions ---
+# --- Shared Utility Functions ---
+
+def normalize_longitude(lon):
+    return ((lon + 180) % 360) - 180
+
+# --- AQI Functions ---
 
 def aqi_to_color(aqi):
     if aqi <= 50:
@@ -71,11 +81,6 @@ def pm25_to_aqi(pm):
         return int(((300 - 201) / (250.4 - 150.5)) * (pm - 150.5) + 201)
     else:
         return int(((500 - 301) / (500.4 - 250.5)) * (pm - 250.5) + 301)
-
-def normalize_longitude(lon):
-    return ((lon + 180) % 360) - 180
-
-# --- Data Fetch and Processing ---
 
 def fetch_aqi_data():
     conn = psycopg2.connect(
@@ -149,7 +154,89 @@ def create_interpolated_overlay(data, resolution=500):
         }
     }
 
-# --- Main API Route with Redis Caching ---
+# --- Wind Functions ---
+
+def direction_speed_to_uv(speed, direction_deg):
+    """Convert wind speed and direction to U and V components."""
+    rad = np.deg2rad(direction_deg)
+    u = speed * np.sin(rad)
+    v = speed * np.cos(rad)
+    return u, v
+
+def fetch_wind_data():
+    conn = psycopg2.connect(
+        dbname=os.getenv("DB_NAME", "airqo"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASS", "postgres"),
+        host=os.getenv("DB_HOST", "localhost"),
+        port=os.getenv("DB_PORT", "5432")
+    )
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT latitude, longitude, wind_speed, wind_direction
+        FROM cams_wind
+        WHERE wind_speed IS NOT NULL AND wind_direction IS NOT NULL;
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    data = []
+    for lat, lon, speed, direction in rows:
+        u, v = direction_speed_to_uv(speed, direction)
+        data.append((lat, normalize_longitude(lon), u, v))
+    return data
+
+def create_wind_overlay(data, resolution=40):
+    if not data:
+        return None
+
+    lats = np.array([d[0] for d in data])
+    lons = np.array([d[1] for d in data])
+    us = np.array([d[2] for d in data])
+    vs = np.array([d[3] for d in data])
+
+    lat_min, lat_max = lats.min(), lats.max()
+    lon_min, lon_max = lons.min(), lons.max()
+
+    grid_lon, grid_lat = np.meshgrid(
+        np.linspace(lon_min, lon_max, resolution),
+        np.linspace(lat_min, lat_max, resolution)
+    )
+
+    grid_u = griddata((lats, lons), us, (grid_lat, grid_lon), method='linear')
+    grid_v = griddata((lats, lons), vs, (grid_lat, grid_lon), method='linear')
+
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=100)
+    ax.set_xlim(lon_min, lon_max)
+    ax.set_ylim(lat_min, lat_max)
+    ax.set_axis_off()
+
+    q = ax.quiver(grid_lon, grid_lat, grid_u, grid_v, color='blue', scale=5)
+
+    buf = BytesIO()
+    plt.savefig(buf, format="png", transparent=True, bbox_inches='tight', pad_inches=0)
+    buf.seek(0)
+    plt.close(fig)
+
+    img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    data_url = f"data:image/png;base64,{img_b64}"
+
+    return {
+        "mapimage": {
+            "image": data_url,
+            "bounds": [[lat_min, lon_min], [lat_max, lon_max]],
+            "lat_min": float(lat_min),
+            "lat_max": float(lat_max),
+            "lon_min": float(lon_min),
+            "lon_max": float(lon_max)
+        },
+        "time": {
+            "generated_at": datetime.utcnow().isoformat() + "Z"
+        }
+    }
+
+# --- API Endpoints ---
 
 @app.get("/aqi-data")
 async def get_aqi_data():
@@ -157,7 +244,7 @@ async def get_aqi_data():
         timestamp_key = datetime.utcnow().strftime("%Y-%m-%dT%H")
         cache_key = f"airqo:aqi_overlay:{timestamp_key}"
 
-        # Try Redis
+        # Try Redis cache
         try:
             cached = redis_client.get(cache_key)
             if cached:
@@ -165,7 +252,7 @@ async def get_aqi_data():
         except Exception as redis_err:
             print(f"[Redis Error - get] {redis_err}")
 
-        # No cache, generate result
+        # Generate new data
         data = fetch_aqi_data()
         if not data:
             return JSONResponse(status_code=404, content={"message": "No valid data available"})
@@ -184,3 +271,41 @@ async def get_aqi_data():
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": str(e)})
+
+@app.get("/wind-overlay")
+async def get_wind_overlay():
+    try:
+        timestamp_key = datetime.utcnow().strftime("%Y-%m-%dT%H")
+        cache_key = f"airqo:wind_overlay:{timestamp_key}"
+
+        # Try Redis cache
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return JSONResponse(content=json.loads(cached))
+        except Exception as redis_err:
+            print(f"[Redis Error - get] {redis_err}")
+
+        data = fetch_wind_data()
+        if not data:
+            return JSONResponse(status_code=404, content={"message": "No wind data available"})
+
+        result = create_wind_overlay(data)
+        if not result:
+            return JSONResponse(status_code=500, content={"message": "Could not generate wind overlay"})
+
+        # Cache for 10 minutes
+        try:
+            redis_client.setex(cache_key, 600, json.dumps(result))
+        except Exception as redis_err:
+            print(f"[Redis Error - set] {redis_err}")
+
+        return result
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"message": str(e)})
+
+# Health check endpoint
+@app.get("/")
+async def root():
+    return {"message": "AirQo API is running", "endpoints": ["/aqi-data", "/wind-overlay"]}
