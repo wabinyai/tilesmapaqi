@@ -33,7 +33,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # Add your frontend URL here
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -271,41 +271,3 @@ async def get_aqi_data():
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": str(e)})
-
-@app.get("/wind-overlay")
-async def get_wind_overlay():
-    try:
-        timestamp_key = datetime.utcnow().strftime("%Y-%m-%dT%H")
-        cache_key = f"airqo:wind_overlay:{timestamp_key}"
-
-        # Try Redis cache
-        try:
-            cached = redis_client.get(cache_key)
-            if cached:
-                return JSONResponse(content=json.loads(cached))
-        except Exception as redis_err:
-            print(f"[Redis Error - get] {redis_err}")
-
-        data = fetch_wind_data()
-        if not data:
-            return JSONResponse(status_code=404, content={"message": "No wind data available"})
-
-        result = create_wind_overlay(data)
-        if not result:
-            return JSONResponse(status_code=500, content={"message": "Could not generate wind overlay"})
-
-        # Cache for 10 minutes
-        try:
-            redis_client.setex(cache_key, 600, json.dumps(result))
-        except Exception as redis_err:
-            print(f"[Redis Error - set] {redis_err}")
-
-        return result
-
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"message": str(e)})
-
-# Health check endpoint
-@app.get("/")
-async def root():
-    return {"message": "AirQo API is running", "endpoints": ["/aqi-data", "/wind-overlay"]}
