@@ -50,7 +50,7 @@ def fetch_wind_data():
         cur = conn.cursor()
         cur.execute("""
             SELECT latitude, longitude, wind_speed, wind_direction, time
-            FROM cams_wind
+            FROM nomads_wind
             WHERE wind_speed IS NOT NULL AND wind_direction IS NOT NULL;
         """)
         rows = cur.fetchall()
@@ -72,7 +72,8 @@ def create_grid(rows):
             continue
 
         lat, lon = round(lat, 1), round(lon, 1)
-        rad = math.radians(direction)
+        #rad = math.radians(direction)
+        rad = math.radians((direction + 180) % 360)
         u = round(speed * math.sin(rad), 2)
         v = round(speed * math.cos(rad), 2)
 
