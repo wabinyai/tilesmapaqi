@@ -269,7 +269,7 @@ async def get_aqi_data():
 
         # Cache for 10 minutes
         try:
-            redis_client.setex(cache_key, 600, json.dumps(result))
+            redis_client.setex(cache_key, 3600, json.dumps(result))
         except Exception as redis_err:
             print(f"[Redis Error - set] {redis_err}")
 
