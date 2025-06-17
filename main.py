@@ -68,19 +68,25 @@ def aqi_to_color(aqi):
     else:
         return to_rgba("maroon")
 
-def pm25_to_aqi(pm):
-    if pm <= 12:
-        return int((50 / 12) * pm)
+def pm25_to_aqi(pm): 
+    pm = max(0, min(pm, 500))  # Ensure PM2.5 is between 0 and 500
+
+    if pm <= 9:
+        aqi = (50 / 9) * pm
     elif pm <= 35.4:
-        return int(((100 - 51) / (35.4 - 12.1)) * (pm - 12.1) + 51)
+        aqi = ((100 - 51) / (35.4 - 9.1)) * (pm - 9.1) + 51
     elif pm <= 55.4:
-        return int(((150 - 101) / (55.4 - 35.5)) * (pm - 35.5) + 101)
+        aqi = ((150 - 101) / (55.4 - 35.5)) * (pm - 35.5) + 101
     elif pm <= 150.4:
-        return int(((200 - 151) / (150.4 - 55.5)) * (pm - 55.5) + 151)
+        aqi = ((200 - 151) / (150.4 - 55.5)) * (pm - 55.5) + 151
     elif pm <= 250.4:
-        return int(((300 - 201) / (250.4 - 150.5)) * (pm - 150.5) + 201)
+        aqi = ((300 - 201) / (250.4 - 150.5)) * (pm - 150.5) + 201
     else:
-        return int(((500 - 301) / (500.4 - 250.5)) * (pm - 250.5) + 301)
+        aqi = ((500 - 301) / (500.4 - 250.5)) * (pm - 250.5) + 301
+
+    return int(min(aqi, 500))  # Ensure AQI is also capped at 500
+
+
 
 def fetch_aqi_data():
     conn = psycopg2.connect(
