@@ -15,6 +15,7 @@ import redis
 import json
 import matplotlib.pyplot as plt
 import matplotlib
+from datetime import datetime
 
 # Use 'Agg' backend for headless environments
 matplotlib.use('Agg')
@@ -68,19 +69,25 @@ def aqi_to_color(aqi):
     else:
         return to_rgba("maroon")
 
-def pm25_to_aqi(pm):
-    if pm <= 12:
-        return int((50 / 12) * pm)
+def pm25_to_aqi(pm): 
+    pm = max(0, min(pm, 500))  # Ensure PM2.5 is between 0 and 500
+
+    if pm <= 9:
+        aqi = (50 / 9) * pm
     elif pm <= 35.4:
-        return int(((100 - 51) / (35.4 - 12.1)) * (pm - 12.1) + 51)
+        aqi = ((100 - 51) / (35.4 - 9.1)) * (pm - 9.1) + 51
     elif pm <= 55.4:
-        return int(((150 - 101) / (55.4 - 35.5)) * (pm - 35.5) + 101)
+        aqi = ((150 - 101) / (55.4 - 35.5)) * (pm - 35.5) + 101
     elif pm <= 150.4:
-        return int(((200 - 151) / (150.4 - 55.5)) * (pm - 55.5) + 151)
+        aqi = ((200 - 151) / (150.4 - 55.5)) * (pm - 55.5) + 151
     elif pm <= 250.4:
-        return int(((300 - 201) / (250.4 - 150.5)) * (pm - 150.5) + 201)
+        aqi = ((300 - 201) / (250.4 - 150.5)) * (pm - 150.5) + 201
     else:
-        return int(((500 - 301) / (500.4 - 250.5)) * (pm - 250.5) + 301)
+        aqi = ((500 - 301) / (500.4 - 250.5)) * (pm - 250.5) + 301
+
+    return int(min(aqi, 500))  # Ensure AQI is also capped at 500
+
+
 
 def fetch_aqi_data():
     conn = psycopg2.connect(
@@ -91,7 +98,15 @@ def fetch_aqi_data():
         port=os.getenv("DB_PORT", "5432")
     )
     cur = conn.cursor()
-    cur.execute("SELECT latitude, longitude, pm2p5 FROM cams_pm25 WHERE pm2p5 IS NOT NULL;")
+
+    today = datetime.today().date()  # datetime.date object 
+    query = """
+        SELECT latitude, longitude, pm2p5
+        FROM cams_pm25
+        WHERE pm2p5 IS NOT NULL
+        AND time::date = %s;
+    """
+    cur.execute(query, (today,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -103,7 +118,7 @@ def fetch_aqi_data():
             valid_data.append((lat, norm_lon, pm))
     return valid_data
 
-def create_interpolated_overlay(data, resolution=500):
+def create_interpolated_overlay(data, resolution=5000):
     if not data:
         return None
 
@@ -150,44 +165,10 @@ def create_interpolated_overlay(data, resolution=500):
             "lon_max": float(lon_max)
         },
         "time": {
-            "generated_at": datetime.utcnow().isoformat() + "Z"
+            "generated_at": datetime.now().isoformat() + "Z"
         }
     }
-
-# --- Wind Functions ---
-
-def direction_speed_to_uv(speed, direction_deg):
-    """Convert wind speed and direction to U and V components."""
-    rad = np.deg2rad(direction_deg)
-    u = speed * np.sin(rad)
-    v = speed * np.cos(rad)
-    return u, v
-
-def fetch_wind_data():
-    conn = psycopg2.connect(
-        dbname=os.getenv("DB_NAME", "airqo"),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASS", "postgres"),
-        host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", "5432")
-    )
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT latitude, longitude, wind_speed, wind_direction
-        FROM cams_wind
-        WHERE wind_speed IS NOT NULL AND wind_direction IS NOT NULL;
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    data = []
-    for lat, lon, speed, direction in rows:
-        u, v = direction_speed_to_uv(speed, direction)
-        data.append((lat, normalize_longitude(lon), u, v))
-    return data
-
-def create_wind_overlay(data, resolution=40):
+ 
     if not data:
         return None
 
@@ -232,7 +213,7 @@ def create_wind_overlay(data, resolution=40):
             "lon_max": float(lon_max)
         },
         "time": {
-            "generated_at": datetime.utcnow().isoformat() + "Z"
+            "generated_at": datetime.now().isoformat() + "Z"
         }
     }
 
@@ -241,7 +222,7 @@ def create_wind_overlay(data, resolution=40):
 @app.get("/aqi-data")
 async def get_aqi_data():
     try:
-        timestamp_key = datetime.utcnow().strftime("%Y-%m-%dT%H")
+        timestamp_key = datetime.today().strftime("%Y-%m-%dT%H")
         cache_key = f"airqo:aqi_overlay:{timestamp_key}"
 
         # Try Redis cache
@@ -263,7 +244,7 @@ async def get_aqi_data():
 
         # Cache for 10 minutes
         try:
-            redis_client.setex(cache_key, 600, json.dumps(result))
+            redis_client.setex(cache_key, 120, json.dumps(result))
         except Exception as redis_err:
             print(f"[Redis Error - set] {redis_err}")
 
@@ -271,3 +252,37 @@ async def get_aqi_data():
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": str(e)})
+
+#deletes the current hour's cache
+@app.post("/invalidate-cache/aqi")
+async def invalidate_aqi_cache():
+    try:
+        timestamp_key = datetime.today().strftime("%Y-%m-%dT%H")
+        cache_key = f"airqo:aqi_overlay:{timestamp_key}"
+        redis_client.delete(cache_key)
+        return {"message": f"Cache {cache_key} invalidated successfully."}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# deletes and regenerates the cache immediately
+@app.post("/refresh-cache/aqi")
+async def refresh_aqi_cache():
+    try:
+        timestamp_key = datetime.today().strftime("%Y-%m-%dT%H")
+        cache_key = f"airqo:aqi_overlay:{timestamp_key}"
+
+        redis_client.delete(cache_key)
+
+        data = fetch_aqi_data()
+        if not data:
+            return JSONResponse(status_code=404, content={"message": "No valid data available"})
+
+        result = create_interpolated_overlay(data)
+        if not result:
+            return JSONResponse(status_code=404, content={"message": "Could not generate overlay"})
+
+        redis_client.setex(cache_key, 3600, json.dumps(result))
+
+        return {"message": "Cache refreshed successfully", "key": cache_key}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
